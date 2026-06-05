@@ -1,142 +1,75 @@
 import numpy as np
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.decomposition import LatentDirichletAllocation
-from sklearn.feature_extraction.text import CountVectorizer
-import networkx as nx
-from sklearn.ensemble import IsolationForest
-import math
+import joblib
+from similarity_analyzer import SemanticAnalyzer
+from graph_analyzer import BehaviorAnalyzer
+from ml_classifier import calculate_entropy
 
+class BuzzerEngineV4:
+    def __init__(self):
+        try:
+            self.model = joblib.load('scraper_engine/buzzer_model.pkl')
+            self.scaler = joblib.load('scraper_engine/scaler.pkl')
+        except:
+            self.model = None 
+            
+        self.semantic = SemanticAnalyzer()
+        self.graph = BehaviorAnalyzer()
 
-model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+    def analyze_comments(self, comments_df):
+        # Perbaikan: Ubah 'content' menjadi 'text' sesuai struktur dataframe database
+        all_texts = comments_df['text'].tolist()
+        features_list = []
+        
+        centrality = self.graph.analyze_network(comments_df)
+        
+        for _, row in comments_df.iterrows():
+            # Perbaikan: Ambil kolom 'text'
+            semantic_feats = self.semantic.get_features(row['text'], all_texts) 
+            
+            features = [
+                semantic_feats[0],      # 1. Semantic Similarity
+                semantic_feats[1],      # 2. Lexical Richness (TTR)
+                calculate_entropy(row['username']), # 3. Username Entropy
+                centrality.get(row['username'], 0),  # 4. Graph Centrality
+                row.get('history_score', 0),         # 5. Global Lookup
+                row.get('spike_score', 0),           # 6. Temporal Spike
+            ]
+            features += [0] * (18 - len(features)) 
+            features_list.append(features)
 
-
-def semantic_similarity(texts):
-
-    embeddings = model.encode(texts)
-
-    sim_matrix = cosine_similarity(embeddings)
-
-    scores = []
-
-    for i in range(len(sim_matrix)):
-
-        scores.append(float(np.mean(sim_matrix[i])))
-
-    return scores
-
-
-def username_entropy(username):
-
-    prob = [ float(username.count(c)) / len(username) for c in dict.fromkeys(list(username)) ]
-
-    entropy = - sum([ p * math.log(p) / math.log(2.0) for p in prob ])
-
-    return entropy
-
-
-def topic_model(texts):
-
-    vectorizer = CountVectorizer(stop_words='english')
-
-    X = vectorizer.fit_transform(texts)
-
-    lda = LatentDirichletAllocation(n_components=3)
-
-    lda.fit(X)
-
-    return lda.components_
-
-
-def build_graph(texts):
-
-    G = nx.Graph()
-
-    for i in range(len(texts)):
-        G.add_node(i)
-
-    for i in range(len(texts)):
-        for j in range(i+1,len(texts)):
-
-            if texts[i] == texts[j]:
-                G.add_edge(i,j)
-
-    return nx.number_connected_components(G)
-
-
-def temporal_anomaly(times):
-
-    model = IsolationForest()
-
-    times = np.array(times).reshape(-1,1)
-
-    model.fit(times)
-
-    return model.predict(times)
-
-
-def classify(comments):
-
-    texts = [c["text"] for c in comments]
-
-    users = [c["user"] for c in comments]
-
-    times = [c["time"] for c in comments]
-
-
-    semantic = semantic_similarity(texts)
-
-    temporal = temporal_anomaly(times)
-
-    graph_cluster = build_graph(texts)
-
-    topic_model(texts)
-
-
-    features = []
-
-    for i in range(len(comments)):
-
-        entropy = username_entropy(users[i])
-
-        features.append([
-            semantic[i],
-            entropy,
-            temporal[i],
-            graph_cluster
-        ])
-
-
-    X = np.array(features)
-
-    y = np.random.randint(0,2,len(X))
-
-    model = RandomForestClassifier()
-
-    model.fit(X,y)
-
-    probs = model.predict_proba(X)[:,1]
-
-
-    results = []
-
-    for i,c in enumerate(comments):
-
-        score = int(probs[i]*100)
-
-        if score > 70:
-            label = "Coordinated Buzzer"
-        elif score > 50:
-            label = "Suspicious"
+        final_results = []
+        
+        if self.model:
+            try:
+                ml_probs = self.model.predict_proba(self.scaler.transform(features_list))[:, 1]
+            except:
+                ml_probs = [0.5] * len(comments_df)
         else:
-            label = "Organic"
+            ml_probs = [0.5] * len(comments_df)
 
-        results.append({
-            "user":c["user"],
-            "text":c["text"],
-            "score":score,
-            "label":label
-        })
+        for i, (idx, row) in enumerate(comments_df.iterrows()):
+            h_score = self._calculate_heuristic(row, features_list[i])
+            ml_score = ml_probs[i] * 100
+            
+            final_score = (0.7 * h_score) + (0.3 * ml_score)
+            
+            final_results.append({
+                'id': row['id'],
+                'score': final_score,
+                'label': self._get_label(final_score, row)
+            })
+            
+        return final_results
 
-    return results
+    def _calculate_heuristic(self, row, features):
+        score = 0
+        if features[0] > 0.8: score += 30 
+        if features[2] > 4.0: score += 20 
+        if features[5] > 0.7: score += 20 
+        return min(score, 100)
+
+    def _get_label(self, score, row):
+        if score > 85 and calculate_entropy(row['username']) > 4.5: return "Bot"
+        if score > 70: return "Coordinated Buzzer"
+        if score >= 50: return "Suspicious"
+        return "Organic"

@@ -1,41 +1,24 @@
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-
-class SimilarityAnalyzer:
-
+class SemanticAnalyzer:
     def __init__(self):
-        self.model = SentenceTransformer(
-            "paraphrase-multilingual-MiniLM-L12-v2"
-        )
+        # Sesuai Dokumentasi v4: Menggunakan Multilingual MiniLM
+        self.model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
-    def analyze(self, comments):
-
-        texts = [c["text"] for c in comments]
-
-        embeddings = self.model.encode(texts)
-
-        sim_matrix = cosine_similarity(embeddings)
-
-        suspicious = []
-
-        for i in range(len(texts)):
-
-            similar_count = 0
-
-            for j in range(len(texts)):
-
-                if i == j:
-                    continue
-
-                if sim_matrix[i][j] > 0.85:
-                    similar_count += 1
-
-            if similar_count > 3:
-
-                suspicious.append({
-                    "text": texts[i],
-                    "similarity": similar_count
-                })
-
-        return suspicious
+    def get_features(self, comment_text, batch_texts):
+        # Deteksi parafrase (Spinning Detection)
+        # Mengambil sampel batch jika data terlalu besar untuk efisiensi
+        embeddings = self.model.encode([comment_text] + batch_texts[:100])
+        
+        target = embeddings[0].reshape(1, -1)
+        others = embeddings[1:]
+        
+        sim_matrix = cosine_similarity(target, others)
+        avg_sim = sim_matrix.mean()
+        
+        # Linguistic Analysis (Fase 2.6)
+        words = comment_text.lower().split()
+        ttr = len(set(words)) / len(words) if len(words) > 0 else 0
+        
+        return [avg_sim, ttr]

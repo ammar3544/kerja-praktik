@@ -18,6 +18,8 @@
 </head>
 
 
+
+
 <body class="bg-slate-100">
 
 <div class="max-w-7xl mx-auto px-8 py-10">
@@ -176,6 +178,16 @@
         </div>
 
 
+        @foreach($comments as $c)
+            <div class="border-b pb-3 text-sm text-slate-700">
+                <span class="font-semibold text-slate-800">
+                    {{ $c->user }} {{-- Kolom 'user' sesuai hasil mapping terminal --}}
+                </span>
+                <span class="text-slate-400">:</span>
+                {{ $c->text }} {{-- Kolom 'text' sesuai hasil mapping terminal --}}
+            </div>
+        @endforeach
+
 
         <!-- ===== COORDINATED CLUSTERS ===== -->
 
@@ -215,31 +227,36 @@
 
     <div class="mt-10 bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
 
-        <h2 class="text-lg font-semibold text-slate-800 mb-5">
-            Comment Stream
-        </h2>
+    <h2 class="text-lg font-semibold text-slate-800 mb-5">
+        Comment Stream
+    </h2>
 
-        <div class="space-y-3 max-h-[420px] overflow-y-auto pr-2">
+    <div class="space-y-3 max-h-[420px] overflow-y-auto pr-2">
 
-            @foreach(($comments ?? []) as $c)
+        @forelse($comments as $c)
+            <div class="border-b pb-3 text-sm text-slate-700">
 
-                <div class="border-b pb-3 text-sm text-slate-700">
+                <span class="font-semibold text-slate-800">
+                    {{-- Menggunakan $c->user karena kolom di DB adalah 'user' --}}
+                    {{ $c->user ?? 'Anonymous' }}
+                </span>
 
-                    <span class="font-semibold text-slate-800">
-                        {{ $c["user"] ?? "user" }}
-                    </span>
+                <span class="text-slate-400">:</span>
 
-                    <span class="text-slate-400">:</span>
+                {{-- Menggunakan $c->text karena kolom di DB adalah 'text' --}}
+                {{ $c->text ?? '' }}
 
-                    {{ $c["text"] ?? "" }}
-
-                </div>
-
-            @endforeach
-
-        </div>
+            </div>
+        @empty
+            <div class="text-center py-10 text-slate-400">
+                <p>Tidak ada komentar ditemukan untuk analisis ini.</p>
+                <p class="text-xs">Pastikan Task ID di Database sudah sesuai.</p>
+            </div>
+        @endforelse
 
     </div>
+
+</div>
 
 
 </div>

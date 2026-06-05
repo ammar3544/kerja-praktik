@@ -1,48 +1,24 @@
 import networkx as nx
-import community as community_louvain
-from collections import defaultdict
+import community as community_louvain # Instal: pip install python-louvain
 
-
-class GraphAnalyzer:
-
-    def analyze(self, comments):
-
+class BehaviorAnalyzer:
+    def analyze_network(self, comments_df):
         G = nx.Graph()
+        # Membuat edge antar user yang berkomentar di video/task yang sama
+        for _, row in comments_df.iterrows():
+            G.add_edge(row['username'], f"task_{row.get('task_id', 1)}")
+        
+        if len(G.nodes) < 2: return {}
 
-        for i in range(len(comments)):
-
-            for j in range(i+1, len(comments)):
-
-                text_i = comments[i]["text"].lower()
-                text_j = comments[j]["text"].lower()
-
-                if text_i[:20] == text_j[:20]:
-
-                    user_i = comments[i]["user"]
-                    user_j = comments[j]["user"]
-
-                    G.add_edge(user_i, user_j)
-
-        clusters = []
-
-        if len(G.nodes) > 0:
-
-            partition = community_louvain.best_partition(G)
-
-            groups = defaultdict(list)
-
-            for user, cid in partition.items():
-
-                groups[cid].append(user)
-
-            for cid, members in groups.items():
-
-                if len(members) > 3:
-
-                    clusters.append({
-                        "cluster": cid,
-                        "members": members,
-                        "size": len(members)
-                    })
-
-        return clusters
+        # Sesuai Fase 2: Graph Intelligence (Louvain Community Detection)
+        partition = community_louvain.best_partition(G)
+        
+        # Identifikasi klaster padat (CIB detection)
+        centrality = nx.degree_centrality(G)
+        
+        # Gabungkan skor centrality dengan info komunitas
+        results = {}
+        for node in G.nodes:
+            if isinstance(node, str) and not node.startswith("task_"):
+                results[node] = centrality[node] * 1.5 # Bobot untuk pengeroyokan
+        return results

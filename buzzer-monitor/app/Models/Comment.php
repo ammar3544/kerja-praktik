@@ -14,11 +14,11 @@ class Comment extends Model
     }
     protected $fillable = [
             'task_id',
-            'user',
+            'username',
             'text',
             'platform',
-            'likes',
-            'sentiment'
+            'buzzer_score', 
+            'label',
     ];
 
 }

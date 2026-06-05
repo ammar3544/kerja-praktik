@@ -4,83 +4,81 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Comment;
+use App\Models\Task;
 use Illuminate\Support\Str;
-use App\Services\SentimentService;
 
 class ScraperController extends Controller
 {
-
-    public function index()
-    {
+    public function index() {
         return view('scraper.index');
     }
 
-    public function scrape(Request $request)
-    {
-
+    public function scrape(Request $request) {
         $url = $request->url;
+        $platform = $request->platform;
+        
+        // Gunakan UUID atau ID unik lainnya
+        $task_id = (string) Str::uuid();
 
-        if(str_contains($url,'tiktok.com')){
-            $platform = "tiktok";
-        }
-        elseif(str_contains($url,'youtube.com') || str_contains($url,'youtu.be')){
-            $platform = "youtube";
-        }
-        else{
-            return back()->with('error','Link tidak dikenali');
-        }
+        if (!$url) return back()->with('error', 'URL tidak boleh kosong');
 
-        $script = base_path('scraper_engine/run_scraper.py');
+        // 1. Buat Task di DB untuk melacak status
+        Task::create([
+            'id' => $task_id,
+            'platform' => $platform,
+            'status' => 'processing',
+            'target_url' => $url
+        ]);
 
-        $platform = escapeshellarg($platform);
-        $url = escapeshellarg($url);
-
-        $command = "cd ".base_path('scraper_engine')." && python run_scraper.py $platform $url";
-
+        // 2. Jalankan Python Engine
+        $escapedPlatform = escapeshellarg($platform);
+        $escapedUrl = escapeshellarg($url);
+        $escapedTask = escapeshellarg($task_id);
+        
+        // Pastikan path ke folder scraper_engine sudah benar
+        $command = "cd " . base_path('scraper_engine') . " && python run_scraper.py $escapedPlatform $escapedUrl $escapedTask 2>&1";
         $output = shell_exec($command);
 
-        $comments = json_decode($output, true);
+        // 3. Validasi Output Python
+        // Kita periksa apakah data benar-benar masuk ke database 
+        // dengan mengecek jumlah baris di tabel comments untuk task ini
+        $count = Comment::where('task_id', $task_id)->count();
 
-        if(!is_array($comments)){
-            $comments = [];
+        if ($count === 0) {
+            // Jika database kosong, kemungkinan Python error atau URL tidak valid
+            return back()->with('error', 'Gagal mengambil data. Pastikan URL benar atau cek koneksi database di skrip Python. Output: ' . substr($output, 0, 100));
         }
 
-        $task = Str::uuid();
+        // 4. Update status Task menjadi selesai
+        Task::where('id', $task_id)->update(['status' => 'completed']);
 
-        $sentiment = new SentimentService();
-
-        foreach($comments as $c){
-
-            $text = $c['text'] ?? '';
-
-            $label = $sentiment->analyze($text);
-
-            Comment::create([
-                'task_id' => $task,
-                'user' => $c['user'] ?? 'unknown',
-                'text' => $text,
-                'platform' => $platform,
-                'likes' => $c['likes'] ?? 0,
-                'sentiment' => $label
-            ]);
-
-        }
-
-        return redirect("/analysis?task=".$task);
-
-        $data = json_decode(trim($output), true);
-
-        $comments = $data["comments"] ?? [];
-        $similar  = $data["similar"] ?? [];
-        $clusters = $data["clusters"] ?? [];
-        $topics   = $data["topics"] ?? [];
-
+        // 5. ALIRKAN LANGSUNG KE RESULT (Gunakan Redirect)
+        // Kita arahkan ke fungsi result() atau ke route yang dituju
+        return redirect()->route('scraper.result', ['task_id' => $task_id])
+                         ->with('success', 'Scraping Selesai! Menampilkan ' . $count . ' data analisis.');
     }
 
-    public function result()
+    public function result(Request $request)
     {
-        return view('scraper.result');
-    }
+        // Ambil task_id dari parameter URL atau Request
+        $taskId = $request->task_id ?? $request->query('task_id');
 
-    
+        if (!$taskId) {
+            return redirect()->route('scraper.page')->with('error', 'ID Analisis tidak ditemukan.');
+        }
+
+        // 1. Ambil data dari database berdasarkan task_id
+        $comments = Comment::where('task_id', $taskId)->get();
+
+        if ($comments->isEmpty()) {
+            return redirect()->route('scraper.page')->with('error', 'Data untuk ID ini kosong atau belum dianalisis.');
+        }
+
+        // 2. Kirim data ke view scraper/result.blade.php
+        return view('scraper.result', [
+            'comments' => $comments,
+            'task_id'  => $taskId,
+            'url'      => 'Report ID: ' . $taskId
+        ]);
+    }
 }
